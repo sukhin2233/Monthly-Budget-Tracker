@@ -1,0 +1,92 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: budgetEntries
+    // Document ID: {entryId}
+    // Fields:
+    //   - id: string (required)
+    //   - date: string (required, format: YYYY-MM-DD)
+    //   - productName: string (required, max 100 chars)
+    //   - amount: number (required, positive)
+    //   - teamMember: string (required)
+    //   - type: string (required, enum: ['Total', 'Advanced'])
+    //   - userId: string (required, matches owner)
+    //   - createdAt: timestamp (required)
+    //
+    // Collection: users
+    // Document ID: {userId}
+    // Fields:
+    //   - uid: string (required)
+    //   - email: string (required)
+    //   - displayName: string (optional)
+    //   - photoURL: string (optional)
+    //   - role: string (required, enum: ['admin', 'user'])
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+         (request.auth.token.email == "edulifesukin05@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isValidBudgetEntry(data) {
+      return data.keys().hasAll(['id', 'date', 'productName', 'amount', 'teamMember', 'type', 'userId', 'createdAt']) &&
+             data.id is string &&
+             data.date is string && data.date.matches("^\\d{4}-\\d{2}-\\d{2}$") &&
+             data.productName is string && data.productName.size() > 0 && data.productName.size() <= 100 &&
+             data.amount is number && data.amount > 0 &&
+             data.teamMember is string &&
+             data.type in ['Total', 'Advanced'] &&
+             data.userId == request.auth.uid &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'role']) &&
+             data.uid == request.auth.uid &&
+             data.email is string &&
+             data.role in ['admin', 'user'];
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isAuthenticated() && isValidUser(request.resource.data) && 
+                      (request.resource.data.role == 'user' || isAdmin());
+      allow update: if isAuthenticated() && isValidUser(request.resource.data) && 
+                      (isOwner(userId) && request.resource.data.role == resource.data.role || isAdmin());
+    }
+
+    match /budgetEntries/{entryId} {
+      allow read: if isAuthenticated() && (isDocOwner() || isAdmin());
+      allow create: if isAuthenticated() && isValidBudgetEntry(request.resource.data);
+      allow update: if isAuthenticated() && isDocOwner() && isValidBudgetEntry(request.resource.data) &&
+                      request.resource.data.userId == resource.data.userId &&
+                      request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isAuthenticated() && (isDocOwner() || isAdmin());
+    }
+  }
+}

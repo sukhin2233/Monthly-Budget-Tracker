@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
@@ -6,11 +6,15 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
-import { TrendingUp, Users, DollarSign, PieChart, AlertCircle, CheckCircle2, Lightbulb, Target, Plus, Trash2, Download, Pencil, X } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Cell } from 'recharts';
+import { TrendingUp, Users, DollarSign, PieChart, AlertCircle, CheckCircle2, Lightbulb, Target, Plus, Trash2, Download, Pencil, X, LogOut, LogIn, Phone } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { INITIAL_DATA } from '@/src/constants';
 import { BudgetEntry } from '@/src/types';
+import { useAuth } from '../lib/AuthContext';
+import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { collection, onSnapshot, query, where, addDoc, updateDoc, deleteDoc, doc, serverTimestamp, orderBy } from 'firebase/firestore';
 
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (active && payload && payload.length) {
@@ -52,8 +56,14 @@ const PREVIOUS_MONTH_DATA = [
 ];
 
 export default function Dashboard() {
-  const [entries, setEntries] = useState<BudgetEntry[]>(INITIAL_DATA);
+  const { user, login, loginWithPhone, logout, loading, isAdmin } = useAuth();
+  const [entries, setEntries] = useState<BudgetEntry[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [verificationCode, setVerificationCode] = useState('');
+  const [confirmationResult, setConfirmationResult] = useState<any>(null);
+  const [isVerifying, setIsVerifying] = useState(false);
   const [formData, setFormData] = useState({
     date: new Date().toISOString().split('T')[0],
     productName: '',
@@ -61,6 +71,157 @@ export default function Dashboard() {
     teamMember: 'Sukhin',
     type: 'Total' as 'Advanced' | 'Total'
   });
+
+  useEffect(() => {
+    if (!user) {
+      setEntries([]);
+      return;
+    }
+
+    const path = 'budgetEntries';
+    const q = isAdmin 
+      ? query(collection(db, path), orderBy('date', 'desc'))
+      : query(collection(db, path), where('userId', '==', user.uid), orderBy('date', 'desc'));
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const fetchedEntries = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as BudgetEntry[];
+      setEntries(fetchedEntries);
+    }, (err) => {
+      handleFirestoreError(err, OperationType.LIST, path);
+    });
+
+    return unsubscribe;
+  }, [user, isAdmin]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    const handlePhoneSignIn = async () => {
+      if (!phoneNumber) return;
+      setIsVerifying(true);
+      setError(null);
+      try {
+        const result = await loginWithPhone(phoneNumber, 'recaptcha-container');
+        setConfirmationResult(result);
+      } catch (err: any) {
+        console.error("Phone sign-in failed", err);
+        setError(err.message || "Failed to send verification code. Make sure the phone number is correct and includes country code (e.g., +1).");
+      } finally {
+        setIsVerifying(false);
+      }
+    };
+
+    const handleVerifyCode = async () => {
+      if (!verificationCode || !confirmationResult) return;
+      setIsVerifying(true);
+      setError(null);
+      try {
+        await confirmationResult.confirm(verificationCode);
+      } catch (err: any) {
+        console.error("Code verification failed", err);
+        setError(err.message || "Invalid verification code.");
+      } finally {
+        setIsVerifying(false);
+      }
+    };
+
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 p-6">
+        <Card className="max-w-md w-full border-none shadow-xl bg-white">
+          <CardHeader className="text-center space-y-2">
+            <div className="mx-auto w-16 h-16 bg-indigo-100 rounded-2xl flex items-center justify-center mb-4">
+              <DollarSign className="w-8 h-8 text-indigo-600" />
+            </div>
+            <CardTitle className="text-2xl font-bold text-slate-900">Market Budget Tracker</CardTitle>
+            <CardDescription>Sign in to manage and track your marketing expenditures.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <Button onClick={login} className="w-full bg-indigo-600 hover:bg-indigo-700 h-12 text-lg">
+              <LogIn className="w-5 h-5 mr-2" />
+              Sign in with Google
+            </Button>
+            
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <span className="w-full border-t border-slate-200" />
+              </div>
+              <div className="relative flex justify-center text-xs uppercase">
+                <span className="bg-white px-2 text-slate-500">Or continue with phone</span>
+              </div>
+            </div>
+
+            {!confirmationResult ? (
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <Label htmlFor="phone">Phone Number</Label>
+                  <Input 
+                    id="phone" 
+                    type="tel" 
+                    placeholder="+1234567890" 
+                    value={phoneNumber}
+                    onChange={(e) => setPhoneNumber(e.target.value)}
+                  />
+                </div>
+                <Button 
+                  onClick={handlePhoneSignIn} 
+                  disabled={!phoneNumber || isVerifying}
+                  variant="outline"
+                  className="w-full h-12"
+                >
+                  <Phone className="w-4 h-4 mr-2" />
+                  {isVerifying ? 'Sending...' : 'Send Verification Code'}
+                </Button>
+                <div id="recaptcha-container"></div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <Label htmlFor="code">Verification Code</Label>
+                  <Input 
+                    id="code" 
+                    type="text" 
+                    placeholder="123456" 
+                    value={verificationCode}
+                    onChange={(e) => setVerificationCode(e.target.value)}
+                  />
+                </div>
+                <Button 
+                  onClick={handleVerifyCode} 
+                  disabled={!verificationCode || isVerifying}
+                  className="w-full h-12 bg-emerald-600 hover:bg-emerald-700"
+                >
+                  {isVerifying ? 'Verifying...' : 'Verify Code'}
+                </Button>
+                <Button 
+                  variant="ghost" 
+                  onClick={() => setConfirmationResult(null)}
+                  className="w-full text-xs text-slate-500"
+                >
+                  Change phone number
+                </Button>
+              </div>
+            )}
+            
+            {error && (
+              <div className="p-3 bg-red-50 border border-red-100 rounded-lg flex items-center gap-2 text-red-600 text-sm">
+                <AlertCircle className="w-4 h-4" />
+                {error}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   const totalSpent = entries.reduce((acc, curr) => acc + curr.amount, 0);
   
@@ -89,34 +250,54 @@ export default function Dashboard() {
     highestSpenderAmount = teamStats[highest].total;
   }
 
-  const handleAddEntry = (e: React.FormEvent) => {
+  const handleAddEntry = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.productName || !formData.amount) return;
+    if (!user) return;
+    setError(null);
 
-    if (editingId) {
-      setEntries(entries.map(entry => 
-        entry.id === editingId 
-          ? { ...entry, ...formData, amount: parseFloat(formData.amount) } 
-          : entry
-      ));
-      setEditingId(null);
-    } else {
-      const newEntry: BudgetEntry = {
-        id: Math.random().toString(36).substr(2, 9),
-        date: formData.date,
-        productName: formData.productName,
-        amount: parseFloat(formData.amount),
-        teamMember: formData.teamMember,
-        type: formData.type
-      };
-      setEntries([newEntry, ...entries]);
+    const amount = parseFloat(formData.amount);
+
+    if (!formData.productName.trim()) {
+      setError('Product name is required');
+      return;
+    }
+    if (!formData.teamMember) {
+      setError('Team member is required');
+      return;
+    }
+    if (isNaN(amount) || amount <= 0) {
+      setError('Amount must be a positive number');
+      return;
     }
 
-    setFormData({
-      ...formData,
-      productName: '',
-      amount: ''
-    });
+    const path = 'budgetEntries';
+    try {
+      if (editingId) {
+        const docRef = doc(db, path, editingId);
+        await updateDoc(docRef, {
+          ...formData,
+          productName: formData.productName.trim(),
+          amount
+        });
+        setEditingId(null);
+      } else {
+        await addDoc(collection(db, path), {
+          ...formData,
+          productName: formData.productName.trim(),
+          amount,
+          userId: user.uid,
+          createdAt: serverTimestamp()
+        });
+      }
+
+      setFormData({
+        ...formData,
+        productName: '',
+        amount: ''
+      });
+    } catch (err) {
+      handleFirestoreError(err, editingId ? OperationType.UPDATE : OperationType.CREATE, path);
+    }
   };
 
   const editEntry = (entry: BudgetEntry) => {
@@ -140,8 +321,13 @@ export default function Dashboard() {
     });
   };
 
-  const removeEntry = (id: string) => {
-    setEntries(entries.filter(e => e.id !== id));
+  const removeEntry = async (id: string) => {
+    const path = 'budgetEntries';
+    try {
+      await deleteDoc(doc(db, path, id));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, path);
+    }
   };
 
   const exportToCSV = () => {
@@ -182,6 +368,13 @@ export default function Dashboard() {
             <p className="text-slate-500 mt-1">Financial Analysis & Performance Dashboard • April 2026</p>
           </div>
           <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 mr-4 px-3 py-1.5 bg-white rounded-full shadow-sm border border-slate-100">
+              <img src={user.photoURL || ''} alt="" className="w-6 h-6 rounded-full" />
+              <span className="text-sm font-medium text-slate-700">{user.displayName}</span>
+              <Button variant="ghost" size="icon" onClick={logout} className="h-8 w-8 text-slate-400 hover:text-red-500">
+                <LogOut className="w-4 h-4" />
+              </Button>
+            </div>
             <Button 
               variant="outline" 
               size="sm" 
@@ -220,73 +413,91 @@ export default function Dashboard() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <form onSubmit={handleAddEntry} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 items-end">
-                <div className="space-y-2">
-                  <Label htmlFor="date">Date</Label>
-                  <Input 
-                    id="date" 
-                    type="date" 
-                    value={formData.date}
-                    onChange={(e) => setFormData({...formData, date: e.target.value})}
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="product">Product Name</Label>
-                  <Input 
-                    id="product" 
-                    placeholder="e.g. Facebook Ads" 
-                    value={formData.productName}
-                    onChange={(e) => setFormData({...formData, productName: e.target.value})}
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="amount">Amount (Tk)</Label>
-                  <Input 
-                    id="amount" 
-                    type="number" 
-                    placeholder="0.00" 
-                    value={formData.amount}
-                    onChange={(e) => setFormData({...formData, amount: e.target.value})}
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Team Member</Label>
-                  <Select 
-                    value={formData.teamMember} 
-                    onValueChange={(value) => setFormData({...formData, teamMember: value})}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select member" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Sukhin">Sukhin</SelectItem>
-                      <SelectItem value="Supon">Supon</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Type</Label>
-                  <div className="flex gap-2">
+              <form onSubmit={handleAddEntry} className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 items-end">
+                  <div className="space-y-2">
+                    <Label htmlFor="date">Date</Label>
+                    <Input 
+                      id="date" 
+                      type="date" 
+                      value={formData.date}
+                      onChange={(e) => setFormData({...formData, date: e.target.value})}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="product">Product Name</Label>
+                    <Input 
+                      id="product" 
+                      placeholder="e.g. Facebook Ads" 
+                      value={formData.productName}
+                      onChange={(e) => setFormData({...formData, productName: e.target.value})}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="amount">Amount (Tk)</Label>
+                    <Input 
+                      id="amount" 
+                      type="number" 
+                      placeholder="0.00" 
+                      step="0.01"
+                      min="0.01"
+                      value={formData.amount}
+                      onChange={(e) => setFormData({...formData, amount: e.target.value})}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Team Member</Label>
                     <Select 
-                      value={formData.type} 
-                      onValueChange={(value: 'Advanced' | 'Total') => setFormData({...formData, type: value})}
+                      value={formData.teamMember} 
+                      onValueChange={(value) => setFormData({...formData, teamMember: value})}
                     >
-                      <SelectTrigger className="flex-1">
-                        <SelectValue placeholder="Type" />
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select member" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="Total">Total</SelectItem>
-                        <SelectItem value="Advanced">Advanced</SelectItem>
+                        <SelectItem value="Sukhin">Sukhin</SelectItem>
+                        <SelectItem value="Supon">Supon</SelectItem>
                       </SelectContent>
                     </Select>
-                    <Button type="submit" className="bg-indigo-600 hover:bg-indigo-700">
-                      {editingId ? 'Update' : 'Add'}
-                    </Button>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Type</Label>
+                    <div className="flex gap-2">
+                      <Select 
+                        value={formData.type} 
+                        onValueChange={(value: 'Advanced' | 'Total') => setFormData({...formData, type: value})}
+                      >
+                        <SelectTrigger className="flex-1">
+                          <SelectValue placeholder="Type" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Total">Total</SelectItem>
+                          <SelectItem value="Advanced">Advanced</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Button type="submit" className="bg-indigo-600 hover:bg-indigo-700">
+                        {editingId ? 'Update' : 'Add'}
+                      </Button>
+                    </div>
                   </div>
                 </div>
+                
+                <AnimatePresence>
+                  {error && (
+                    <motion.div 
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="flex items-center gap-2 text-red-500 text-sm font-medium bg-red-50 p-2 rounded-lg border border-red-100"
+                    >
+                      <AlertCircle className="w-4 h-4" />
+                      {error}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </form>
             </CardContent>
           </Card>
@@ -461,7 +672,7 @@ export default function Dashboard() {
                         tickLine={false} 
                         tick={{ fill: '#64748B', fontSize: 12 }}
                       />
-                      <Tooltip 
+                      <RechartsTooltip 
                         cursor={{ fill: '#F8FAFC' }}
                         content={<CustomTooltip />}
                       />
@@ -525,16 +736,25 @@ export default function Dashboard() {
                       </div>
 
                       <div className="pt-2">
-                        <div className="h-2 w-full bg-slate-200 rounded-full overflow-hidden flex">
-                          <div 
-                            className="h-full bg-slate-400" 
-                            style={{ width: `${(prev.total / Math.max(prev.total, currentTotal)) * 100}%` }} 
-                          />
-                          <div 
-                            className={`h-full ${isIncrease ? 'bg-indigo-500' : 'bg-emerald-500'}`} 
-                            style={{ width: `${(Math.abs(diff) / Math.max(prev.total, currentTotal)) * 100}%` }} 
-                          />
-                        </div>
+                        <Tooltip>
+                          <TooltipTrigger>
+                            <div className="h-2 w-full bg-slate-200 rounded-full overflow-hidden flex cursor-help">
+                              <div 
+                                className="h-full bg-slate-400" 
+                                style={{ width: `${(prev.total / Math.max(prev.total, currentTotal)) * 100}%` }} 
+                              />
+                              <div 
+                                className={`h-full ${isIncrease ? 'bg-indigo-500' : 'bg-emerald-500'}`} 
+                                style={{ width: `${(Math.abs(diff) / Math.max(prev.total, currentTotal)) * 100}%` }} 
+                              />
+                            </div>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p className="text-xs font-bold">
+                              {isIncrease ? '+' : ''}{percentChange}% variance
+                            </p>
+                          </TooltipContent>
+                        </Tooltip>
                         <p className="text-[10px] mt-2 text-slate-500 italic">
                           {isIncrease 
                             ? `Spending increased by ${diff.toLocaleString()} Tk this month.` 
