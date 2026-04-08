@@ -11,34 +11,15 @@
         "amount": { "type": "number" },
         "teamMember": { "type": "string" },
         "type": { "type": "string", "enum": ["Total", "Advanced"] },
-        "userId": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["id", "date", "productName", "amount", "teamMember", "type", "userId", "createdAt"]
-    },
-    "userProfile": {
-      "title": "User Profile",
-      "description": "User profile information.",
-      "type": "object",
-      "properties": {
-        "uid": { "type": "string" },
-        "email": { "type": "string", "format": "email" },
-        "displayName": { "type": "string" },
-        "photoURL": { "type": "string" },
-        "phoneNumber": { "type": "string" },
-        "role": { "type": "string", "enum": ["admin", "user"] }
-      },
-      "required": ["uid", "role"]
+      "required": ["id", "date", "productName", "amount", "teamMember", "type", "createdAt"]
     }
   },
   "firestore": {
     "/budgetEntries/{entryId}": {
       "schema": "budgetEntry",
       "description": "Collection of all budget entries."
-    },
-    "/users/{userId}": {
-      "schema": "userProfile",
-      "description": "User profile documents."
     }
   }
 }

@@ -8,13 +8,12 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Cell } from 'recharts';
-import { TrendingUp, Users, DollarSign, PieChart, AlertCircle, CheckCircle2, Lightbulb, Target, Plus, Trash2, Download, Pencil, X, LogOut, LogIn, Phone } from 'lucide-react';
+import { TrendingUp, Users, DollarSign, PieChart, AlertCircle, CheckCircle2, Lightbulb, Target, Plus, Trash2, Download, Pencil, X, Phone, Inbox, BarChart3, Shield, ShieldCheck, ShieldAlert } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { INITIAL_DATA } from '@/src/constants';
 import { BudgetEntry } from '@/src/types';
-import { useAuth } from '../lib/AuthContext';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { collection, onSnapshot, query, where, addDoc, updateDoc, deleteDoc, doc, serverTimestamp, orderBy } from 'firebase/firestore';
+import { collection, onSnapshot, query, addDoc, updateDoc, deleteDoc, doc, serverTimestamp, orderBy } from 'firebase/firestore';
 
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (active && payload && payload.length) {
@@ -56,14 +55,13 @@ const PREVIOUS_MONTH_DATA = [
 ];
 
 export default function Dashboard() {
-  const { user, login, loginWithPhone, logout, loading, isAdmin } = useAuth();
   const [entries, setEntries] = useState<BudgetEntry[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [phoneNumber, setPhoneNumber] = useState('');
-  const [verificationCode, setVerificationCode] = useState('');
-  const [confirmationResult, setConfirmationResult] = useState<any>(null);
-  const [isVerifying, setIsVerifying] = useState(false);
+  const [isAdminMode, setIsAdminMode] = useState(false);
+  const [adminPassword, setAdminPassword] = useState('');
+  const [showAdminLogin, setShowAdminLogin] = useState(false);
+  
   const [formData, setFormData] = useState({
     date: new Date().toISOString().split('T')[0],
     productName: '',
@@ -73,15 +71,8 @@ export default function Dashboard() {
   });
 
   useEffect(() => {
-    if (!user) {
-      setEntries([]);
-      return;
-    }
-
     const path = 'budgetEntries';
-    const q = isAdmin 
-      ? query(collection(db, path), orderBy('date', 'desc'))
-      : query(collection(db, path), where('userId', '==', user.uid), orderBy('date', 'desc'));
+    const q = query(collection(db, path), orderBy('date', 'desc'));
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const fetchedEntries = snapshot.docs.map(doc => ({
@@ -94,134 +85,20 @@ export default function Dashboard() {
     });
 
     return unsubscribe;
-  }, [user, isAdmin]);
+  }, []);
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
-      </div>
-    );
-  }
-
-  if (!user) {
-    const handlePhoneSignIn = async () => {
-      if (!phoneNumber) return;
-      setIsVerifying(true);
+  const handleAdminLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    // Simple demo password: "admin"
+    if (adminPassword === 'admin') {
+      setIsAdminMode(true);
+      setShowAdminLogin(false);
+      setAdminPassword('');
       setError(null);
-      try {
-        const result = await loginWithPhone(phoneNumber, 'recaptcha-container');
-        setConfirmationResult(result);
-      } catch (err: any) {
-        console.error("Phone sign-in failed", err);
-        setError(err.message || "Failed to send verification code. Make sure the phone number is correct and includes country code (e.g., +1).");
-      } finally {
-        setIsVerifying(false);
-      }
-    };
-
-    const handleVerifyCode = async () => {
-      if (!verificationCode || !confirmationResult) return;
-      setIsVerifying(true);
-      setError(null);
-      try {
-        await confirmationResult.confirm(verificationCode);
-      } catch (err: any) {
-        console.error("Code verification failed", err);
-        setError(err.message || "Invalid verification code.");
-      } finally {
-        setIsVerifying(false);
-      }
-    };
-
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 p-6">
-        <Card className="max-w-md w-full border-none shadow-xl bg-white">
-          <CardHeader className="text-center space-y-2">
-            <div className="mx-auto w-16 h-16 bg-indigo-100 rounded-2xl flex items-center justify-center mb-4">
-              <DollarSign className="w-8 h-8 text-indigo-600" />
-            </div>
-            <CardTitle className="text-2xl font-bold text-slate-900">Market Budget Tracker</CardTitle>
-            <CardDescription>Sign in to manage and track your marketing expenditures.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <Button onClick={login} className="w-full bg-indigo-600 hover:bg-indigo-700 h-12 text-lg">
-              <LogIn className="w-5 h-5 mr-2" />
-              Sign in with Google
-            </Button>
-            
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <span className="w-full border-t border-slate-200" />
-              </div>
-              <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-white px-2 text-slate-500">Or continue with phone</span>
-              </div>
-            </div>
-
-            {!confirmationResult ? (
-              <div className="space-y-3">
-                <div className="space-y-1">
-                  <Label htmlFor="phone">Phone Number</Label>
-                  <Input 
-                    id="phone" 
-                    type="tel" 
-                    placeholder="+1234567890" 
-                    value={phoneNumber}
-                    onChange={(e) => setPhoneNumber(e.target.value)}
-                  />
-                </div>
-                <Button 
-                  onClick={handlePhoneSignIn} 
-                  disabled={!phoneNumber || isVerifying}
-                  variant="outline"
-                  className="w-full h-12"
-                >
-                  <Phone className="w-4 h-4 mr-2" />
-                  {isVerifying ? 'Sending...' : 'Send Verification Code'}
-                </Button>
-                <div id="recaptcha-container"></div>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <div className="space-y-1">
-                  <Label htmlFor="code">Verification Code</Label>
-                  <Input 
-                    id="code" 
-                    type="text" 
-                    placeholder="123456" 
-                    value={verificationCode}
-                    onChange={(e) => setVerificationCode(e.target.value)}
-                  />
-                </div>
-                <Button 
-                  onClick={handleVerifyCode} 
-                  disabled={!verificationCode || isVerifying}
-                  className="w-full h-12 bg-emerald-600 hover:bg-emerald-700"
-                >
-                  {isVerifying ? 'Verifying...' : 'Verify Code'}
-                </Button>
-                <Button 
-                  variant="ghost" 
-                  onClick={() => setConfirmationResult(null)}
-                  className="w-full text-xs text-slate-500"
-                >
-                  Change phone number
-                </Button>
-              </div>
-            )}
-            
-            {error && (
-              <div className="p-3 bg-red-50 border border-red-100 rounded-lg flex items-center gap-2 text-red-600 text-sm">
-                <AlertCircle className="w-4 h-4" />
-                {error}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+    } else {
+      setError('Invalid admin password');
+    }
+  };
 
   const totalSpent = entries.reduce((acc, curr) => acc + curr.amount, 0);
   
@@ -252,7 +129,6 @@ export default function Dashboard() {
 
   const handleAddEntry = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user) return;
     setError(null);
 
     const amount = parseFloat(formData.amount);
@@ -285,7 +161,6 @@ export default function Dashboard() {
           ...formData,
           productName: formData.productName.trim(),
           amount,
-          userId: user.uid,
           createdAt: serverTimestamp()
         });
       }
@@ -368,13 +243,15 @@ export default function Dashboard() {
             <p className="text-slate-500 mt-1">Financial Analysis & Performance Dashboard • April 2026</p>
           </div>
           <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 mr-4 px-3 py-1.5 bg-white rounded-full shadow-sm border border-slate-100">
-              <img src={user.photoURL || ''} alt="" className="w-6 h-6 rounded-full" />
-              <span className="text-sm font-medium text-slate-700">{user.displayName}</span>
-              <Button variant="ghost" size="icon" onClick={logout} className="h-8 w-8 text-slate-400 hover:text-red-500">
-                <LogOut className="w-4 h-4" />
-              </Button>
-            </div>
+            <Button 
+              variant={isAdminMode ? "default" : "outline"}
+              size="sm" 
+              onClick={() => isAdminMode ? setIsAdminMode(false) : setShowAdminLogin(true)}
+              className={`flex items-center gap-2 shadow-sm ${isAdminMode ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-white border-slate-200'}`}
+            >
+              {isAdminMode ? <ShieldCheck className="w-4 h-4" /> : <Shield className="w-4 h-4" />}
+              <span>{isAdminMode ? 'Admin Active' : 'Admin Panel'}</span>
+            </Button>
             <Button 
               variant="outline" 
               size="sm" 
@@ -605,7 +482,7 @@ export default function Dashboard() {
                             </TableCell>
                             <TableCell className="text-right font-bold text-slate-900">{entry.amount.toLocaleString()} Tk</TableCell>
                             <TableCell>
-                              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                              <div className={`flex items-center gap-1 transition-all ${isAdminMode ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
                                 <Button 
                                   variant="ghost" 
                                   size="icon" 
@@ -614,14 +491,16 @@ export default function Dashboard() {
                                 >
                                   <Pencil className="w-4 h-4" />
                                 </Button>
-                                <Button 
-                                  variant="ghost" 
-                                  size="icon" 
-                                  onClick={() => removeEntry(entry.id)}
-                                  className="text-slate-400 hover:text-red-500"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </Button>
+                                {isAdminMode && (
+                                  <Button 
+                                    variant="ghost" 
+                                    size="icon" 
+                                    onClick={() => removeEntry(entry.id)}
+                                    className="text-slate-400 hover:text-red-500"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </Button>
+                                )}
                               </div>
                             </TableCell>
                           </motion.tr>
@@ -629,8 +508,31 @@ export default function Dashboard() {
                       </AnimatePresence>
                       {entries.length === 0 && (
                         <TableRow>
-                          <TableCell colSpan={6} className="text-center py-10 text-slate-400">
-                            No entries found. Add your first budget entry above.
+                          <TableCell colSpan={6} className="h-[300px] text-center">
+                            <motion.div 
+                              initial={{ opacity: 0 }} 
+                              animate={{ opacity: 1 }}
+                              className="flex flex-col items-center justify-center space-y-4"
+                            >
+                              <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center">
+                                <Inbox className="w-8 h-8 text-slate-300" />
+                              </div>
+                              <div className="space-y-1">
+                                <p className="text-slate-900 font-bold">No entries yet</p>
+                                <p className="text-slate-500 text-sm max-w-[200px] mx-auto">
+                                  Your marketing expenditures will appear here once you add them.
+                                </p>
+                              </div>
+                              <Button 
+                                variant="outline" 
+                                size="sm" 
+                                onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+                                className="text-indigo-600 border-indigo-100 hover:bg-indigo-50"
+                              >
+                                <Plus className="w-4 h-4 mr-2" />
+                                Add First Entry
+                              </Button>
+                            </motion.div>
                           </TableCell>
                         </TableRow>
                       )}
@@ -684,8 +586,16 @@ export default function Dashboard() {
                     </BarChart>
                   </ResponsiveContainer>
                 ) : (
-                  <div className="h-full flex items-center justify-center text-slate-400 italic">
-                    No data to visualize
+                  <div className="h-full flex flex-col items-center justify-center space-y-4">
+                    <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center">
+                      <BarChart3 className="w-8 h-8 text-slate-300" />
+                    </div>
+                    <div className="text-center space-y-1">
+                      <p className="text-slate-900 font-bold">No data to visualize</p>
+                      <p className="text-slate-500 text-sm max-w-[180px]">
+                        Add budget entries to see the team performance breakdown.
+                      </p>
+                    </div>
                   </div>
                 )}
               </CardContent>
@@ -855,6 +765,65 @@ export default function Dashboard() {
             <a href="#" className="hover:text-indigo-500 transition-colors">Contact Support</a>
           </div>
         </footer>
+
+        {/* Admin Login Modal */}
+        <AnimatePresence>
+          {showAdminLogin && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="w-full max-w-sm"
+              >
+                <Card className="border-none shadow-2xl">
+                  <CardHeader className="text-center">
+                    <div className="mx-auto w-12 h-12 bg-indigo-100 rounded-full flex items-center justify-center mb-2">
+                      <ShieldAlert className="w-6 h-6 text-indigo-600" />
+                    </div>
+                    <CardTitle>Admin Access</CardTitle>
+                    <CardDescription>Enter password to unlock admin features</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <form onSubmit={handleAdminLogin} className="space-y-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="admin-pass">Password</Label>
+                        <Input 
+                          id="admin-pass" 
+                          type="password" 
+                          placeholder="••••••••" 
+                          value={adminPassword}
+                          onChange={(e) => setAdminPassword(e.target.value)}
+                          autoFocus
+                        />
+                      </div>
+                      {error && (
+                        <p className="text-xs text-red-500 font-medium">{error}</p>
+                      )}
+                      <div className="flex gap-2">
+                        <Button 
+                          type="button" 
+                          variant="ghost" 
+                          className="flex-1"
+                          onClick={() => {
+                            setShowAdminLogin(false);
+                            setAdminPassword('');
+                            setError(null);
+                          }}
+                        >
+                          Cancel
+                        </Button>
+                        <Button type="submit" className="flex-1 bg-indigo-600 hover:bg-indigo-700">
+                          Unlock
+                        </Button>
+                      </div>
+                    </form>
+                  </CardContent>
+                </Card>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
       </div>
     </div>
   );
