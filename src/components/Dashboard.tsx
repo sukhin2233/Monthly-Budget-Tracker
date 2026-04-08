@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
-import { TrendingUp, Users, DollarSign, PieChart, AlertCircle, CheckCircle2, Lightbulb, Target, Plus, Trash2, Download } from 'lucide-react';
+import { TrendingUp, Users, DollarSign, PieChart, AlertCircle, CheckCircle2, Lightbulb, Target, Plus, Trash2, Download, Pencil, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { INITIAL_DATA } from '@/src/constants';
 import { BudgetEntry } from '@/src/types';
@@ -53,6 +53,7 @@ const PREVIOUS_MONTH_DATA = [
 
 export default function Dashboard() {
   const [entries, setEntries] = useState<BudgetEntry[]>(INITIAL_DATA);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     date: new Date().toISOString().split('T')[0],
     productName: '',
@@ -92,16 +93,46 @@ export default function Dashboard() {
     e.preventDefault();
     if (!formData.productName || !formData.amount) return;
 
-    const newEntry: BudgetEntry = {
-      id: Math.random().toString(36).substr(2, 9),
-      date: formData.date,
-      productName: formData.productName,
-      amount: parseFloat(formData.amount),
-      teamMember: formData.teamMember,
-      type: formData.type
-    };
+    if (editingId) {
+      setEntries(entries.map(entry => 
+        entry.id === editingId 
+          ? { ...entry, ...formData, amount: parseFloat(formData.amount) } 
+          : entry
+      ));
+      setEditingId(null);
+    } else {
+      const newEntry: BudgetEntry = {
+        id: Math.random().toString(36).substr(2, 9),
+        date: formData.date,
+        productName: formData.productName,
+        amount: parseFloat(formData.amount),
+        teamMember: formData.teamMember,
+        type: formData.type
+      };
+      setEntries([newEntry, ...entries]);
+    }
 
-    setEntries([newEntry, ...entries]);
+    setFormData({
+      ...formData,
+      productName: '',
+      amount: ''
+    });
+  };
+
+  const editEntry = (entry: BudgetEntry) => {
+    setFormData({
+      date: entry.date,
+      productName: entry.productName,
+      amount: entry.amount.toString(),
+      teamMember: entry.teamMember,
+      type: entry.type
+    });
+    setEditingId(entry.id);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
     setFormData({
       ...formData,
       productName: '',
@@ -171,13 +202,22 @@ export default function Dashboard() {
 
         {/* Entry Form */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
-          <Card className="border-none shadow-sm bg-white">
+          <Card className={`border-none shadow-sm transition-colors duration-300 ${editingId ? 'bg-indigo-50/50 ring-2 ring-indigo-500/20' : 'bg-white'}`}>
             <CardHeader>
-              <CardTitle className="text-xl font-bold flex items-center gap-2">
-                <Plus className="w-5 h-5 text-indigo-500" />
-                Add New Budget Entry
+              <CardTitle className="text-xl font-bold flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  {editingId ? <Pencil className="w-5 h-5 text-indigo-500" /> : <Plus className="w-5 h-5 text-indigo-500" />}
+                  {editingId ? 'Edit Budget Entry' : 'Add New Budget Entry'}
+                </div>
+                {editingId && (
+                  <Button variant="ghost" size="sm" onClick={cancelEdit} className="text-slate-500 hover:text-slate-900">
+                    <X className="w-4 h-4 mr-1" /> Cancel Edit
+                  </Button>
+                )}
               </CardTitle>
-              <CardDescription>Enter the details of the new marketing expenditure.</CardDescription>
+              <CardDescription>
+                {editingId ? 'Modify the details of the selected expenditure.' : 'Enter the details of the new marketing expenditure.'}
+              </CardDescription>
             </CardHeader>
             <CardContent>
               <form onSubmit={handleAddEntry} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 items-end">
@@ -243,7 +283,7 @@ export default function Dashboard() {
                       </SelectContent>
                     </Select>
                     <Button type="submit" className="bg-indigo-600 hover:bg-indigo-700">
-                      Add
+                      {editingId ? 'Update' : 'Add'}
                     </Button>
                   </div>
                 </div>
@@ -354,14 +394,24 @@ export default function Dashboard() {
                             </TableCell>
                             <TableCell className="text-right font-bold text-slate-900">{entry.amount.toLocaleString()} Tk</TableCell>
                             <TableCell>
-                              <Button 
-                                variant="ghost" 
-                                size="icon" 
-                                onClick={() => removeEntry(entry.id)}
-                                className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-red-500 transition-all"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </Button>
+                              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                                <Button 
+                                  variant="ghost" 
+                                  size="icon" 
+                                  onClick={() => editEntry(entry)}
+                                  className="text-slate-400 hover:text-indigo-500"
+                                >
+                                  <Pencil className="w-4 h-4" />
+                                </Button>
+                                <Button 
+                                  variant="ghost" 
+                                  size="icon" 
+                                  onClick={() => removeEntry(entry.id)}
+                                  className="text-slate-400 hover:text-red-500"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </Button>
+                              </div>
                             </TableCell>
                           </motion.tr>
                         ))}
